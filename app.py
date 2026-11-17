@@ -1206,18 +1206,22 @@ def page_gam():
     except ImportError:
         pass
 
-    if pygam_available:
+    is_multiclass = (task == "classification" and len(np.unique(y_tr)) > 2)
+    use_pygam = pygam_available and not is_multiclass
+
+    if use_pygam:
         st.success("✅ Using **pyGAM** for GAM implementation.")
+    elif is_multiclass:
+        st.info("ℹ️ Multiclass target detected (Low, Moderate, High). Using **Spline-based GAM (Cubic B-Splines + Multinomial Model)**, as pyGAM LogisticGAM only supports binary classes.")
     else:
-        st.info("ℹ️ pyGAM not installed. Using **spline-based GAM approximation** "
-                 "with sklearn's SplineTransformer + Linear model.")
+        st.info("ℹ️ pyGAM not installed. Using **spline-based GAM approximation** with sklearn's SplineTransformer + Linear model.")
 
     with st.expander("⚙️ Hyperparameters", expanded=True):
         n_splines = st.slider("Number of Splines", 5, 30, 10, key="gam_splines")
 
     if st.button("🚀 Train GAM Model", type="primary"):
         with st.spinner("Training GAM…"):
-            if pygam_available:
+            if use_pygam:
                 from pygam import LinearGAM, LogisticGAM, s
                 # Build spline terms
                 terms = s(0, n_splines=n_splines)
@@ -1319,9 +1323,14 @@ def page_gam():
                                 x_range = np.linspace(X_tr[:, fi].min(), X_tr[:, fi].max(), 100)
                                 X_grid = np.tile(X_mean, (100, 1))
                                 X_grid[:, fi] = x_range
-                                y_grid = model.predict(X_grid)
+                                if hasattr(model, "predict_proba"):
+                                    y_grid = model.predict_proba(X_grid)[:, -1]
+                                    ylabel = "P(High Pollution)"
+                                else:
+                                    y_grid = model.predict(X_grid)
+                                    ylabel = "Prediction"
                                 fig_pd = px.line(x=x_range, y=y_grid,
-                                                  labels={"x": feature_names[fi], "y": "Prediction"})
+                                                  labels={"x": feature_names[fi], "y": ylabel})
                                 fig_pd.update_layout(title=feature_names[fi], height=280,
                                                       template="plotly_white")
                                 st.plotly_chart(fig_pd, use_container_width=True)
