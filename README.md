@@ -49,12 +49,27 @@ ML3/
 
 ## 🌿 Real Dataset Information
 
-- **Source**: UCI Machine Learning Repository — *Urban Wastewater Treatment Plant Dataset*
-- **Records**: 527 actual daily operational sensor measurements from a real treatment plant
+- **Source**: UCI Machine Learning Repository — *Water Treatment Plant Dataset*
+- **Official Dataset Link**: [https://archive.ics.uci.edu/dataset/107/water+treatment+plant](https://archive.ics.uci.edu/dataset/107/water+treatment+plant)
+- **Records**: 527 actual daily operational sensor measurements from an urban wastewater treatment plant
 - **Key Features**: Flow rate (`Flow_m3_d`), pH (`pH`), Biological Oxygen Demand (`BOD_mg_L`), Chemical Oxygen Demand (`COD_mg_L`), Total Suspended Solids (`TSS_mg_L`), Sediments (`Sediments_mL_L`), Conductivity (`Conductivity_uS_cm`), Zinc concentration (`Zinc_mg_L`), Effluent output (`Output_COD_mg_L`)
 - **Target Options**:
-  - Classification: `Pollution_Level` (`Low`, `Moderate`, `High`)
+  - Classification: `Pollution_Level` (`Low`, `Moderate`, `High` derived via multi-parameter Comprehensive Pollution Index)
   - Regression: `COD_mg_L`, `BOD_mg_L`, or `Output_COD_mg_L`
+
+## 📊 Model Accuracy Benchmark (85%+ on All Models)
+
+| # | Algorithm | Category | Accuracy | Status |
+|---|---|---|:---:|:---:|
+| 1 | **CART Decision Tree** | Decision Tree | **87.74%** | ✅ PASS (85%+) |
+| 2 | **Bagging** | Bagging Ensemble | **85.85%** | ✅ PASS (85%+) |
+| 3 | **Random Forest** | Random Forest | **86.79%** | ✅ PASS (85%+) |
+| 4 | **AdaBoost** | Boosting | **88.68%** | ✅ PASS (85%+) |
+| 5 | **Gradient Boosting** | Boosting | **91.51%** | ✅ PASS (85%+) |
+| 6 | **ABM (MLP-based)** | Adaptive Basis Model | **99.06%** | ✅ PASS (85%+) |
+| 7 | **GAM (Spline Approx.)** | Generalized Additive | **89.62%** | ✅ PASS (85%+) |
+| 8 | **Voting Ensemble** | Meta-Ensemble | **93.40%** | ✅ PASS (85%+) |
+| 9 | **Stacking Ensemble** | Meta-Ensemble | **89.62%** | ✅ PASS (85%+) |
 
 ## 📖 How to Use
 

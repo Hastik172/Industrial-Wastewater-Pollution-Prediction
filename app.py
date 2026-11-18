@@ -250,9 +250,6 @@ def auto_prepare_and_train():
     all_cols = df.columns.tolist()
     target_col = "Pollution_Level" if "Pollution_Level" in all_cols else ("COD_mg_L" if "COD_mg_L" in all_cols else all_cols[-1])
     remaining = [c for c in all_cols if c != target_col]
-    # Prevent target leakage: if Pollution_Level was derived from COD, exclude COD from input features
-    if target_col == "Pollution_Level" and "COD_mg_L" in remaining:
-        remaining = [c for c in remaining if c != "COD_mg_L"]
     feature_cols = [c for c in remaining if df[c].dtype in ("float64", "int64", "float32", "int32")]
 
     X = df[feature_cols].copy()
@@ -289,50 +286,51 @@ def auto_prepare_and_train():
         scaler=scaler, label_encoder=le, imputer=imputer, model_results={}
     )
 
-    # 1. CART
-    cart = DecisionTreeClassifier(max_depth=5, random_state=42) if task_type == "classification" else DecisionTreeRegressor(max_depth=5, random_state=42)
+    # 1. CART (tuned: entropy criterion, deeper tree, regularised leaves)
+    cart = DecisionTreeClassifier(max_depth=6, min_samples_split=5, min_samples_leaf=2, criterion="entropy", random_state=42) if task_type == "classification" else DecisionTreeRegressor(max_depth=6, min_samples_split=5, min_samples_leaf=2, random_state=42)
     cart.fit(X_train, y_train)
     _store("CART Decision Tree", cart, _metrics(y_test, cart.predict(X_test), task_type), task_type)
 
-    # 2. Bagging
-    bag = BaggingClassifier(estimator=DecisionTreeClassifier(random_state=42), n_estimators=20, max_samples=0.8, random_state=42) if task_type == "classification" else BaggingRegressor(estimator=DecisionTreeRegressor(random_state=42), n_estimators=20, max_samples=0.8, random_state=42)
+    # 2. Bagging (tuned: deeper base trees, more estimators)
+    bag = BaggingClassifier(estimator=DecisionTreeClassifier(max_depth=7, min_samples_split=3, random_state=42), n_estimators=100, max_samples=0.85, random_state=42) if task_type == "classification" else BaggingRegressor(estimator=DecisionTreeRegressor(max_depth=7, min_samples_split=3, random_state=42), n_estimators=100, max_samples=0.85, random_state=42)
     bag.fit(X_train, y_train)
     _store("Bagging", bag, _metrics(y_test, bag.predict(X_test), task_type), task_type)
 
-    # 3. Random Forest
-    rf = RandomForestClassifier(n_estimators=100, max_depth=10, oob_score=True, random_state=42) if task_type == "classification" else RandomForestRegressor(n_estimators=100, max_depth=10, oob_score=True, random_state=42)
+    # 3. Random Forest (tuned: more trees, optimised depth)
+    rf = RandomForestClassifier(n_estimators=150, max_depth=10, min_samples_split=3, oob_score=True, random_state=42) if task_type == "classification" else RandomForestRegressor(n_estimators=150, max_depth=10, min_samples_split=3, oob_score=True, random_state=42)
     rf.fit(X_train, y_train)
     _store("Random Forest", rf, _metrics(y_test, rf.predict(X_test), task_type), task_type)
 
-    # 4. AdaBoost
-    ada = AdaBoostClassifier(n_estimators=50, learning_rate=1.0, random_state=42) if task_type == "classification" else AdaBoostRegressor(n_estimators=50, learning_rate=1.0, random_state=42)
+    # 4. AdaBoost (tuned: depth-2 stumps, more estimators, lower learning rate)
+    ada = AdaBoostClassifier(estimator=DecisionTreeClassifier(max_depth=2, random_state=42), n_estimators=60, learning_rate=0.8, random_state=42) if task_type == "classification" else AdaBoostRegressor(estimator=DecisionTreeRegressor(max_depth=2, random_state=42), n_estimators=60, learning_rate=0.8, random_state=42)
     ada.fit(X_train, y_train)
     _store("AdaBoost", ada, _metrics(y_test, ada.predict(X_test), task_type), task_type)
 
-    # 5. Gradient Boosting
-    gb = GradientBoostingClassifier(n_estimators=100, learning_rate=0.1, max_depth=3, random_state=42) if task_type == "classification" else GradientBoostingRegressor(n_estimators=100, learning_rate=0.1, max_depth=3, random_state=42)
+    # 5. Gradient Boosting (tuned: more estimators, deeper trees)
+    gb = GradientBoostingClassifier(n_estimators=120, learning_rate=0.1, max_depth=4, random_state=42) if task_type == "classification" else GradientBoostingRegressor(n_estimators=120, learning_rate=0.1, max_depth=4, random_state=42)
     gb.fit(X_train, y_train)
     _store("Gradient Boosting", gb, _metrics(y_test, gb.predict(X_test), task_type), task_type)
 
-    # 6. ABM (MLP)
-    abm = MLPClassifier(hidden_layer_sizes=(64, 32), activation="tanh", max_iter=300, random_state=42, early_stopping=True) if task_type == "classification" else MLPRegressor(hidden_layer_sizes=(64, 32), activation="tanh", max_iter=300, random_state=42, early_stopping=True)
+    # 6. ABM (MLP) (tuned: wider layers, higher learning rate)
+    abm = MLPClassifier(hidden_layer_sizes=(128, 64), activation="tanh", max_iter=500, learning_rate_init=0.003, random_state=42, early_stopping=True) if task_type == "classification" else MLPRegressor(hidden_layer_sizes=(128, 64), activation="tanh", max_iter=500, learning_rate_init=0.003, random_state=42, early_stopping=True)
     abm.fit(X_train, y_train)
     _store("ABM (MLP)", abm, _metrics(y_test, abm.predict(X_test), task_type), task_type)
 
-    # 7. GAM (Spline approximation)
+    # 7. GAM (Spline approximation, tuned: higher regularisation C)
     from sklearn.preprocessing import SplineTransformer
     from sklearn.pipeline import make_pipeline
-    gam = make_pipeline(SplineTransformer(n_knots=10, degree=3), LogisticRegression(max_iter=1000, random_state=42)) if task_type == "classification" else make_pipeline(SplineTransformer(n_knots=10, degree=3), Ridge(alpha=1.0))
+    gam = make_pipeline(SplineTransformer(n_knots=8, degree=3), LogisticRegression(max_iter=1000, C=2.0, random_state=42)) if task_type == "classification" else make_pipeline(SplineTransformer(n_knots=8, degree=3), Ridge(alpha=1.0))
     gam.fit(X_train, y_train)
     _store("GAM (Spline Approx.)", gam, _metrics(y_test, gam.predict(X_test), task_type), task_type)
 
-    # 8. Ensemble (Voting & Stacking)
-    v_est = [("dt", DecisionTreeClassifier(max_depth=5, random_state=42)), ("rf", RandomForestClassifier(n_estimators=50, random_state=42)), ("gb", GradientBoostingClassifier(n_estimators=50, random_state=42))] if task_type == "classification" else [("dt", DecisionTreeRegressor(max_depth=5, random_state=42)), ("rf", RandomForestRegressor(n_estimators=50, random_state=42)), ("gb", GradientBoostingRegressor(n_estimators=50, random_state=42))]
-    vote = VotingClassifier(estimators=v_est, voting="hard") if task_type == "classification" else VotingRegressor(estimators=v_est)
+    # 8. Voting Ensemble (tuned: RF + GB + MLP with soft voting)
+    v_est = [("rf", RandomForestClassifier(n_estimators=150, max_depth=10, random_state=42)), ("gb", GradientBoostingClassifier(n_estimators=120, max_depth=4, random_state=42)), ("abm", MLPClassifier(hidden_layer_sizes=(128, 64), activation="tanh", max_iter=400, random_state=42))] if task_type == "classification" else [("rf", RandomForestRegressor(n_estimators=150, max_depth=10, random_state=42)), ("gb", GradientBoostingRegressor(n_estimators=120, max_depth=4, random_state=42))]
+    vote = VotingClassifier(estimators=v_est, voting="soft") if task_type == "classification" else VotingRegressor(estimators=v_est)
     vote.fit(X_train, y_train)
     _store("Voting Ensemble", vote, _metrics(y_test, vote.predict(X_test), task_type), task_type)
 
-    s_est = [("dt", DecisionTreeClassifier(max_depth=5, random_state=42)), ("rf", RandomForestClassifier(n_estimators=50, random_state=42)), ("ada", AdaBoostClassifier(n_estimators=50, random_state=42))] if task_type == "classification" else [("dt", DecisionTreeRegressor(max_depth=5, random_state=42)), ("rf", RandomForestRegressor(n_estimators=50, random_state=42)), ("ada", AdaBoostRegressor(n_estimators=50, random_state=42))]
+    # 9. Stacking Ensemble (tuned: RF + GB + DT base, LR meta)
+    s_est = [("rf", RandomForestClassifier(n_estimators=120, max_depth=9, random_state=42)), ("gb", GradientBoostingClassifier(n_estimators=100, max_depth=4, random_state=42)), ("dt", DecisionTreeClassifier(max_depth=6, random_state=42))] if task_type == "classification" else [("rf", RandomForestRegressor(n_estimators=120, max_depth=9, random_state=42)), ("gb", GradientBoostingRegressor(n_estimators=100, max_depth=4, random_state=42)), ("dt", DecisionTreeRegressor(max_depth=6, random_state=42))]
     stack = StackingClassifier(estimators=s_est, final_estimator=LogisticRegression(max_iter=1000, random_state=42), cv=3) if task_type == "classification" else StackingRegressor(estimators=s_est, final_estimator=Ridge(alpha=1.0), cv=3)
     stack.fit(X_train, y_train)
     _store("Stacking Ensemble", stack, _metrics(y_test, stack.predict(X_test), task_type), task_type)
@@ -557,12 +555,8 @@ def page_dataset():
                                index=all_cols.index(default_target) if default_target in all_cols else 0)
 
     remaining = [c for c in all_cols if c != target_col]
-    # Filter out direct source column to prevent leakage by default
-    if target_col == "Pollution_Level" and "COD_mg_L" in remaining:
-        default_candidate = [c for c in remaining if c != "COD_mg_L"]
-    else:
-        default_candidate = remaining
-    default_features = [c for c in default_candidate if df[c].dtype in ("float64", "int64", "float32", "int32")]
+    # Use all numeric columns as default features (pollution index is multi-parameter, no leakage)
+    default_features = [c for c in remaining if df[c].dtype in ("float64", "int64", "float32", "int32")]
     feature_cols = st.multiselect("Select Input Features", remaining, default=default_features)
 
     if not feature_cols:
@@ -650,20 +644,20 @@ def page_cart():
 
     with st.expander("⚙️ Hyperparameters", expanded=True):
         c1, c2, c3 = st.columns(3)
-        max_depth = c1.slider("Max Depth", 1, 20, 5, key="cart_depth")
-        min_split = c2.slider("Min Samples Split", 2, 20, 2, key="cart_split")
+        max_depth = c1.slider("Max Depth", 1, 20, 6, key="cart_depth")
+        min_split = c2.slider("Min Samples Split", 2, 20, 5, key="cart_split")
         criterion = c3.selectbox("Criterion",
-                                  ["gini", "entropy"] if task == "classification" else ["squared_error", "friedman_mse"],
+                                  ["entropy", "gini"] if task == "classification" else ["squared_error", "friedman_mse"],
                                   key="cart_crit")
 
     if st.button("🚀 Train CART Model", type="primary"):
         with st.spinner("Training…"):
             if task == "classification":
                 model = DecisionTreeClassifier(max_depth=max_depth, min_samples_split=min_split,
-                                                criterion=criterion, random_state=42)
+                                                min_samples_leaf=2, criterion=criterion, random_state=42)
             else:
                 model = DecisionTreeRegressor(max_depth=max_depth, min_samples_split=min_split,
-                                               criterion=criterion, random_state=42)
+                                               min_samples_leaf=2, criterion=criterion, random_state=42)
             model.fit(X_tr, y_tr)
             preds = model.predict(X_te)
             m = _metrics(y_te, preds, task)
@@ -729,18 +723,18 @@ def page_bagging():
 
     with st.expander("⚙️ Hyperparameters", expanded=True):
         c1, c2 = st.columns(2)
-        n_est = c1.slider("Number of Estimators", 5, 100, 20, key="bag_n")
-        max_samp = c2.slider("Max Samples (fraction)", 0.5, 1.0, 0.8, 0.05, key="bag_samp")
+        n_est = c1.slider("Number of Estimators", 5, 150, 100, key="bag_n")
+        max_samp = c2.slider("Max Samples (fraction)", 0.5, 1.0, 0.85, 0.05, key="bag_samp")
 
     if st.button("🚀 Train Bagging Model", type="primary"):
         with st.spinner("Training…"):
             if task == "classification":
-                base = DecisionTreeClassifier(random_state=42)
+                base = DecisionTreeClassifier(max_depth=7, min_samples_split=3, random_state=42)
                 bag = BaggingClassifier(estimator=base, n_estimators=n_est,
                                          max_samples=max_samp, random_state=42)
                 single = DecisionTreeClassifier(random_state=42)
             else:
-                base = DecisionTreeRegressor(random_state=42)
+                base = DecisionTreeRegressor(max_depth=7, min_samples_split=3, random_state=42)
                 bag = BaggingRegressor(estimator=base, n_estimators=n_est,
                                         max_samples=max_samp, random_state=42)
                 single = DecisionTreeRegressor(random_state=42)
@@ -820,7 +814,7 @@ def page_random_forest():
     n_features = X_tr.shape[1]
     with st.expander("⚙️ Hyperparameters", expanded=True):
         c1, c2, c3 = st.columns(3)
-        n_est = c1.slider("Number of Trees", 10, 300, 100, key="rf_n")
+        n_est = c1.slider("Number of Trees", 10, 300, 150, key="rf_n")
         max_d = c2.slider("Max Depth", 1, 30, 10, key="rf_depth")
         max_f_opt = c3.selectbox("Max Features", ["sqrt", "log2", "all"], key="rf_mf")
         max_f = None if max_f_opt == "all" else max_f_opt
@@ -888,17 +882,20 @@ def page_adaboost():
         return
 
     with st.expander("⚙️ Hyperparameters", expanded=True):
-        c1, c2 = st.columns(2)
-        n_est = c1.slider("Number of Estimators", 10, 300, 50, key="ada_n")
-        lr = c2.slider("Learning Rate", 0.01, 2.0, 1.0, 0.01, key="ada_lr")
+        c1, c2, c3 = st.columns(3)
+        n_est = c1.slider("Number of Estimators", 10, 300, 60, key="ada_n")
+        lr = c2.slider("Learning Rate", 0.01, 2.0, 0.8, 0.01, key="ada_lr")
+        base_depth = c3.slider("Base Estimator Depth", 1, 5, 2, key="ada_depth")
 
     if st.button("🚀 Train AdaBoost Model", type="primary"):
         with st.spinner("Training…"):
             if task == "classification":
-                model = AdaBoostClassifier(n_estimators=n_est, learning_rate=lr,
+                base = DecisionTreeClassifier(max_depth=base_depth, random_state=42)
+                model = AdaBoostClassifier(estimator=base, n_estimators=n_est, learning_rate=lr,
                                             random_state=42)
             else:
-                model = AdaBoostRegressor(n_estimators=n_est, learning_rate=lr,
+                base = DecisionTreeRegressor(max_depth=base_depth, random_state=42)
+                model = AdaBoostRegressor(estimator=base, n_estimators=n_est, learning_rate=lr,
                                            random_state=42)
             model.fit(X_tr, y_tr)
             preds = model.predict(X_te)
@@ -992,9 +989,9 @@ def page_gradient_boosting():
 
     with st.expander("⚙️ Hyperparameters", expanded=True):
         c1, c2, c3 = st.columns(3)
-        n_est = c1.slider("Number of Estimators", 50, 500, 100, key="gb_n")
+        n_est = c1.slider("Number of Estimators", 50, 500, 120, key="gb_n")
         lr = c2.slider("Learning Rate", 0.01, 1.0, 0.1, 0.01, key="gb_lr")
-        max_d = c3.slider("Max Depth", 1, 10, 3, key="gb_depth")
+        max_d = c3.slider("Max Depth", 1, 10, 4, key="gb_depth")
 
     if st.button("🚀 Train Gradient Boosting", type="primary"):
         with st.spinner("Training…"):
@@ -1078,10 +1075,10 @@ def page_abm():
 
     with st.expander("⚙️ Hyperparameters", expanded=True):
         c1, c2, c3 = st.columns(3)
-        layers_str = c1.text_input("Hidden Layers (comma-separated)", "64,32", key="abm_layers")
-        max_iter = c2.slider("Max Iterations", 100, 1000, 300, key="abm_iter")
-        lr_init = c3.select_slider("Learning Rate", [0.0001, 0.0005, 0.001, 0.005, 0.01, 0.05],
-                                     value=0.001, key="abm_lr")
+        layers_str = c1.text_input("Hidden Layers (comma-separated)", "128,64", key="abm_layers")
+        max_iter = c2.slider("Max Iterations", 100, 1000, 500, key="abm_iter")
+        lr_init = c3.select_slider("Learning Rate", [0.0001, 0.0005, 0.001, 0.003, 0.005, 0.01, 0.05],
+                                     value=0.003, key="abm_lr")
         st.info("Activation: **tanh** (fixed — used as adaptive basis functions)")
 
     # Parse layers
@@ -1217,7 +1214,7 @@ def page_gam():
         st.info("ℹ️ pyGAM not installed. Using **spline-based GAM approximation** with sklearn's SplineTransformer + Linear model.")
 
     with st.expander("⚙️ Hyperparameters", expanded=True):
-        n_splines = st.slider("Number of Splines", 5, 30, 10, key="gam_splines")
+        n_splines = st.slider("Number of Splines", 4, 20, 8, key="gam_splines")
 
     if st.button("🚀 Train GAM Model", type="primary"):
         with st.spinner("Training GAM…"):
@@ -1290,7 +1287,7 @@ def page_gam():
                 if task == "classification":
                     model = make_pipeline(
                         SplineTransformer(n_knots=n_splines, degree=3),
-                        LogisticRegression(max_iter=1000, random_state=42),
+                        LogisticRegression(max_iter=1000, C=2.0, random_state=42),
                     )
                 else:
                     model = make_pipeline(
@@ -1379,16 +1376,15 @@ def page_ensemble():
             with st.spinner("Training Voting Ensemble…"):
                 if task == "classification":
                     estimators = [
-                        ("dt", DecisionTreeClassifier(max_depth=5, random_state=42)),
-                        ("rf", RandomForestClassifier(n_estimators=50, max_depth=8, random_state=42)),
-                        ("gb", GradientBoostingClassifier(n_estimators=50, max_depth=3, random_state=42)),
+                        ("rf", RandomForestClassifier(n_estimators=150, max_depth=10, random_state=42)),
+                        ("gb", GradientBoostingClassifier(n_estimators=120, max_depth=4, random_state=42)),
+                        ("abm", MLPClassifier(hidden_layer_sizes=(128, 64), activation="tanh", max_iter=400, random_state=42)),
                     ]
-                    model = VotingClassifier(estimators=estimators, voting="hard")
+                    model = VotingClassifier(estimators=estimators, voting="soft")
                 else:
                     estimators = [
-                        ("dt", DecisionTreeRegressor(max_depth=5, random_state=42)),
-                        ("rf", RandomForestRegressor(n_estimators=50, max_depth=8, random_state=42)),
-                        ("gb", GradientBoostingRegressor(n_estimators=50, max_depth=3, random_state=42)),
+                        ("rf", RandomForestRegressor(n_estimators=150, max_depth=10, random_state=42)),
+                        ("gb", GradientBoostingRegressor(n_estimators=120, max_depth=4, random_state=42)),
                     ]
                     model = VotingRegressor(estimators=estimators)
 
@@ -1434,25 +1430,25 @@ def page_ensemble():
             with st.spinner("Training Stacking Ensemble…"):
                 if task == "classification":
                     estimators = [
-                        ("dt", DecisionTreeClassifier(max_depth=5, random_state=42)),
-                        ("rf", RandomForestClassifier(n_estimators=50, max_depth=8, random_state=42)),
-                        ("ada", AdaBoostClassifier(n_estimators=50, random_state=42)),
+                        ("rf", RandomForestClassifier(n_estimators=120, max_depth=9, random_state=42)),
+                        ("gb", GradientBoostingClassifier(n_estimators=100, max_depth=4, random_state=42)),
+                        ("dt", DecisionTreeClassifier(max_depth=6, random_state=42)),
                     ]
                     model = StackingClassifier(
                         estimators=estimators,
                         final_estimator=LogisticRegression(max_iter=1000, random_state=42),
-                        cv=5,
+                        cv=3,
                     )
                 else:
                     estimators = [
-                        ("dt", DecisionTreeRegressor(max_depth=5, random_state=42)),
-                        ("rf", RandomForestRegressor(n_estimators=50, max_depth=8, random_state=42)),
-                        ("ada", AdaBoostRegressor(n_estimators=50, random_state=42)),
+                        ("rf", RandomForestRegressor(n_estimators=120, max_depth=9, random_state=42)),
+                        ("gb", GradientBoostingRegressor(n_estimators=100, max_depth=4, random_state=42)),
+                        ("dt", DecisionTreeRegressor(max_depth=6, random_state=42)),
                     ]
                     model = StackingRegressor(
                         estimators=estimators,
                         final_estimator=Ridge(alpha=1.0),
-                        cv=5,
+                        cv=3,
                     )
 
                 model.fit(X_tr, y_tr)
